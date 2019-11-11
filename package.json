@@ -12,8 +12,12 @@
   "license": "ISC",
   "dependencies": {
     "elasticsearch": "^16.5.0",
+    "exceljs": "^3.3.1",
     "express": "^4.17.1",
     "nodemon": "^1.19.4",
-    "request": "^2.88.0"
+    "request": "^2.88.0",
+    "swagger-jsdoc": "^3.4.0",
+    "swagger-ui-express": "^4.1.2",
+    "workbook": "^1.1.3"
   }
 }
