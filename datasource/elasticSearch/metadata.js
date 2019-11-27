@@ -1,6 +1,8 @@
 const express = require('express');
 const app = express();
 const request = require('request');
+const url = require('../../utilFunctions/urlBuilding');
+const datasource = require('../../utilFunctions/getDatasource')
 app.use('/', express.static('app', { redirect: false }));
 var a = {
    "targets": [
@@ -79,143 +81,215 @@ var a = {
 
 //buildMetadata(a);
 
-async function buildMetadata(viz) {
+function isArray(array) {
+   if (Array.isArray(array)) {
+      array.forEach(arr => {
+         return isArray(arr);
+      })
+   } else if (typeof array == 'object') {
+      return array;
+   }
+
+   return array;
+}
+
+async function buildMetadata(viz, esUrl) {
    var panel = []
    var aggs = {
+      'title': viz.title,
+      'esUrl': esUrl,
       'aggs': []
    };
 
-   await viz['targets'].forEach(async targets => {
-      //console.log(viz["targets"])
-      bucket = await bucketBuilding(targets.bucketAggs);
-      metric = await metricBuilding(targets.metrics);
-      //console.log("BUCKET", bucket);
-      bucket.forEach(async data => {
-         await aggs.aggs.push(data);
+   return new Promise(async (resolve, reject) => {
+      // var result = [],
+      buckets = [],
+         metrics = [];
+      var buckets = viz.targets.map(async targets => {
+         return await bucketBuilding(targets.bucketAggs);
       });
-      metric.forEach(async element => {
-         await aggs.aggs.push(element);
+      var metrics = viz.targets.map(async targets => {
+         return await metricBuilding(targets.metrics);
+      });
+      Promise.all(buckets).then(result => {
+         result[0].forEach(val => {
+            aggs.aggs.push(val);
+         });
+      });
+      Promise.all(metrics).then(result => {
+         result[0].forEach(val => {
+            aggs.aggs.push(val);
+         });
       });
 
-      //panel.push(aggs);
-      //console.log("AGGS------------->" + JSON.stringify(aggs))
-   });
-   //console.log(panel)
-   // 
-   //console.log("This is the final aggs" + JSON.stringify(aggs))
-   return aggs;
+      resolve(aggs);
+   })
 }
+var bucketData = [];
+async function bucketBuilding(bucket) {
+   return new Promise(async (resolve, reject) => {
+      bucketData = bucket.map(element => {
+         switch (element.type) {
+            case 'date_histogram':
+               //console.log("*************************")
+               params = {
+                  'field': element.field,
+                  'timeRange': {
+                     'from': 'now - ' + element.settings.interval,
+                     'to': 'now'
+                  },
+                  "useNormalizedEsInterval": true,
+                  "interval": "auto",
+                  "drop_partials": false,
+                  "min_doc_count": 0,
+                  "extended_bounds": {}
 
-function bucketBuilding(bucket) {
-   var bucketData = [];
-   //console.log('buckets', bucket)
-   bucket.forEach(element => {
-      bucketMetadata = {
-         "enabled": true,
-         "id": element.id,
-         "schema": "bucket",
-         "type": element.type,
-         "params": {}
-      };
-      switch (element.type) {
-         case 'date_histogram':
-            //console.log("*************************")
-            Object.assign(bucketMetadata.params, {
-               'field': element.field,
-               'timeRange': {
-                  'from': 'now - ' + element.settings.interval,
-                  'to': 'now'
-               },
-               "useNormalizedEsInterval": true,
-               "interval": "auto",
-               "drop_partials": false,
-               "min_doc_count": 0,
-               "extended_bounds": {}
-
-            })
-            break;
-         case 'terms':
-            Object.assign(bucketMetadata.params, {
-               "field": element.field,
-               "missingBucket": false,
-               "missingBucketLabel": "Missing",
-               "order": element.settings.order,
-               "orderBy": element.settings.orderBy,
-               "otherBucket": false,
-               "otherBucketLabel": "Other",
-               "size": element.settings.size
-            })
-            break;
-         case 'geohash_grid':
-            Object.assign(bucketMetadata.params, {
-               "field": element.field,
-               "autoPrecision": true,
-               "precision": element.settings.precision,
-               "useGeocentroid": true,
-               "isFilteredByCollar": true,
-               "mapZoom": 2,
-               "mapCenter": [
-                  0,
-                  0
-               ]
-            })
-            break;
-         case 'histogram':
-            Object.assign(bucketMetadata.params, {
-               "field": element.field,
-               "interval": element.settings.interval,
-               "min_doc_count": false,
-               "has_extended_bounds": false,
-               "extended_bounds": {
-                  "min": "",
-                  "max": ""
                }
-            })
-            break;
-
-      }
-      //Object.assign(bucketData, bucketMetadata);
-      bucketData.push(bucketMetadata);
-      //console.log("++++++++" + JSON.stringify(bucketMetadata));
-   });
-   // 
-   // console.log('bucketList-----------', bucketData);
-
-   return (bucketData)
-}
-function metricBuilding(metric) {
-   var metricData = [];
-   //console.log(metric)
-   metric.forEach(async element => {
-      var metricMetadata = {
-         'id': element.id,
-         'enabled': 'true',
-         'type': element.type,
-         'schema': 'metric',
-         'params': {
-            'field': element.field
+               break;
+            case 'terms':
+               params = {
+                  "field": element.field,
+                  "missingBucket": false,
+                  "missingBucketLabel": "Missing",
+                  "order": element.settings.order,
+                  "orderBy": element.settings.orderBy,
+                  "otherBucket": false,
+                  "otherBucketLabel": "Other",
+                  "size": element.settings.size
+               }
+               break;
+            case 'geohash_grid':
+               params = {
+                  "field": element.field,
+                  "autoPrecision": true,
+                  "precision": element.settings.precision,
+                  "useGeocentroid": true,
+                  "isFilteredByCollar": true,
+                  "mapZoom": 2,
+                  "mapCenter": [
+                     0,
+                     0
+                  ]
+               }
+               break;
+            case 'histogram':
+               params = {
+                  "field": element.field,
+                  "interval": element.settings.interval,
+                  "min_doc_count": false,
+                  "has_extended_bounds": false,
+                  "extended_bounds": {
+                     "min": "",
+                     "max": ""
+                  }
+               }
+               break;
          }
-      }
-      await metricData.push(metricMetadata);
-      //console.log("+++++++" + JSON.stringify(metricData))
-   });
-   //console.log('metricList-----------', metricData)
-   return metricData;
+
+         bucketMetadata = {
+            "enabled": true,
+            "id": element.id,
+            "schema": "bucket",
+            "type": element.type,
+            "params": params
+         };
+         return bucketMetadata
+      });
+      console.log('444444444444444', bucketData)
+      resolve(bucketData);
+   })
 }
-//buildMetadata(a);
-app.get("/metadata", async (req, res) => {
+var metricData = [];
+async function metricBuilding(metric) {
+   return new Promise(async (resolve, reject) => {
+      metricData = await metric.map(data => {
+         var metricMetadata = {
+            'id': data.id,
+            'enabled': 'true',
 
-   var met = await buildMetadata(a);
+            'type': data.type,
+            'schema': 'metric',
+            'params': {}
+         }
+         if (data.type != 'count') {
+            Object.assign(metricMetadata.params, { 'field': data.field })
+         }
+         return metricMetadata;
+         //metricData.push(metricMetadata);
+         //console.log("+++++++" + JSON.stringify(metricData))
+      });
+      //console.log('metricList-----------', metricData)
+      resolve(metricData);
+   });
+}
 
-   var list = []
-   list.push(met)
+function makeMetadata(panels, dashboardURL) {
+   return new Promise(async (resolve, reject) => {
+      request(url.buildUrl(dashboardURL, "GET", ""), async (error, response, body) => {
+         console.log(dashboardURL)
+         if (!error && response.statusCode == 200) {
+            if (panels == undefined || panels.length == 0) {
+               panels = [];
+               panels = (JSON.parse(body).dashboard.panels);
+            }//console.log(JSON.parse(body).meta.slug)
+            var filename = JSON.parse(body).meta.slug;
+            //console.log(panels)
+            metaDataList = [];
+            // for (let i = 0; i < 1; i++) {
+            var i = 0
+            var datasourceInfo = await datasource.getDatasourceList();
 
-   // console.log("metadata------------------------->" + (list))
-   res.send(list);
 
-})
+            await panels.forEach(viz => {
+               console.log(viz.datasource)
+               //console.log(viz, 'This iteration is-------------->', i)
+               if (viz.datasource == null) {
+                  Object.keys(datasourceInfo).forEach(async element => {
+                     //console.log(datasourceInfo[element].isDefault)
+
+                     if (datasourceInfo[element].isDefault && datasourceInfo[element].type == 'elasticsearch') {
+                        var value = await buildMetadata(viz, datasourceInfo[element].url);
+                        console.log('55555555555555555555555', JSON.stringify(value, null, 1));
+                        metaDataList.push(value);
+                     }
+
+                  });
+               }
+
+               else if (viz.datasource != null && datasourceInfo[viz.datasource].type == 'elasticsearch') {
+                  // console.log(datasourceInfo[viz.datasource].url)
+                  var value = buildMetadata(viz, datasourceInfo[element].url);
+                  console.log('6666666666666666666666', JSON.stringify(value));
+                  metaDataList.push(value);
+
+                  // console.log('111111111111111', buildMetadata(viz))
+                  //console.log(viz)
+               }
+
+
+               //await queryBuilding.buildQuery(viz, filename)
+            });
+            //await queryBuilding.buildQuery(viz[0], filename);
+            // }
 
 
 
-module.exports = buildMetadata;
+            //res.download('./' + filename + '.xlsx')
+            setTimeout(() => {
+               console.log('555555555555555555555555555', metaDataList)
+               //exports.metaDataList = metaDataList;
+               resolve(metaDataList);
+            }, 1000)
+         }
+         else if (error) {
+            console.log(error)
+            reject(error);
+         }
+      })
+   })
+}
+
+
+
+module.exports = makeMetadata;
 

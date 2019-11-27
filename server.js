@@ -1,16 +1,16 @@
 //TODO: Externalize the below const's
 
-const buildMetadata = require('./datasource/elasticSearch/metadata');
-var dashboardURL = 'api/dashboards/uid/agx8OjAZz';
-
+const ExcelJS = require('exceljs');
+const Excel = require('exceljs/lib/exceljs.nodejs')
+const makeMetadata = require('./datasource/elasticSearch/metadata');
+var dashboardURL = 'api/dashboards/uid/';
+const get_Esquery = require('./datasource/elasticSearch/queryBuilding');
 const url = require('./utilFunctions/urlBuilding')
 const datasource = require('./utilFunctions/getDatasource')
 const queryBuilding = require('./utilFunctions/queryBuilding')
 const express = require('express');
 var bodyParser = require('body-parser');
-//const ExcelJS = require('exceljs');
-const Excel = require('exceljs/lib/exceljs.nodejs');
-var workbook = new Excel.Workbook();
+
 const swaggerJsDoc = require('swagger-jsdoc');
 const swaggerui = require('swagger-ui-express');
 const swaggerOptions = {
@@ -175,12 +175,35 @@ app.get('/dashboards', function (req, res) {
  *         
  *
  */
-
+var dashboardURL;
+var thisPanel = {};
+var panels;
+var metaDataList;
 app.post('/configure/dashboard', function (req, res) {
+    dashboardURL = 'api/dashboards/uid/';
     if (req.body['uid'] != null) {
         dashboardURL += req.body['uid'];
+        console.log(dashboardURL)
         exports.dashboardURL = dashboardURL;
-        res.send("dashboard added.");
+        request(url.buildUrl(dashboardURL, "GET", ""), async (error, response, body) => {
+            //console.log(dashboardURL)
+            if (!error && response.statusCode == 200) {
+                metaDataList = []
+                metaDataList = await makeMetadata([], dashboardURL);
+                panels = (JSON.parse(body).dashboard.panels);
+                console.log(typeof panels)
+                panels.forEach(element => {
+                    thisPanel[element.id] = element.title
+                })
+                res.send(thisPanel);
+            }
+            else if (error) {
+                res.send(error)
+                console.log("error");
+
+            }
+        })
+        //res.send("dashboard added.");
     }
     else {
         console.log(req.body)
@@ -209,9 +232,91 @@ app.get('/datasource', function (req, res) {
     })
 });
 
+
+/**
+ *
+ * /build/metadata:
+*   get:
+ *     description: Build Metadata for elasticsearch
+ *     produces:
+ *       - application/json
+ *     responses:
+ *       200:
+ *         description: success
+ *         schema:
+ *           type: object
+ *
+ */
+
+// app.get('/build/metadata', async function (req, res) {
+//     metaDataList = [];
+//     //console.log("EXPORT FUNCTION")
+//     //console.log(dashboardURL)
+//     metaDataList = await makeMetadata([], dashboardURL);
+//     //console.log("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", metaDataList);
+//     res.send(metaDataList);
+
+//     // res.write('works');
+
+
+
+// });
 /**
  * @swagger
- * /export:
+ * /configure/panel:
+*   post:
+ *     description: Set panels to be exported
+ *     produces:
+ *       - application/json
+ *     parameters:
+ *       - name: UID
+ *         description: viz ID's
+ *         in: body
+ *         required: true
+ *         schema:
+ *           type: object
+ *           properties:
+ *              value:
+ *                  type: array
+ *                  items:
+ *                      type: integer
+ *     responses:
+ *       200:
+ *         description: success
+ *
+ *
+ */
+app.post('/configure/panel', async function (req, res) {
+    metaDataList = []
+    // console.log(req.body)
+    var selectivePanels = []
+    //var i = 0;
+    pList = req.body.value;
+    var i;
+    panels.map(async element => {
+        //await console.log("####################", req.body.value)
+        //console.log(element.id == req.body.value[i])
+
+        for (i = 0; i < pList.length; i++) {
+
+            if (element.id == req.body.value[i]) {
+                //console.log(element.id, req.body.value[i])
+                //await console.log(element.title);
+                await selectivePanels.push(element);
+            }
+        }
+
+    })
+    metaDataList = await makeMetadata(selectivePanels, dashboardURL);
+
+    res.send(selectivePanels)
+
+
+})
+
+/**
+ * @swagger
+ * /export/excel:
 *   get:
  *     description: get excel
  *     produces:
@@ -223,74 +328,45 @@ app.get('/datasource', function (req, res) {
  *           type: file
  *
  */
-app.get('/export', async function (req, res) {
-    //console.log("EXPORT FUNCTION")
-    //console.log(dashboardURL)
-    await request(url.buildUrl(dashboardURL, "GET", ""), async (error, response, body) => {
-        if (!error && response.statusCode == 200) {
-            var panels = [];
-            panels = (JSON.parse(body).dashboard.panels);
-            //console.log(JSON.parse(body).meta.slug)
-            var filename = JSON.parse(body).meta.slug;
-            //console.log(panels)
-            var metaDataList = [];
-            // for (let i = 0; i < 1; i++) {
-            var i = 0
-            var datasourceInfo = await datasource.getDatasourceList();
-
-
-            await panels.map(viz => {
-
-                //console.log(viz, 'This iteration is-------------->', i)
-
-                if (viz.datasource != null && datasourceInfo[viz.datasource].type == 'elasticsearch') {
-                    buildMetadata(viz).then(val => {
-                        metaDataList.push(val);
-                        console.log('111111111111111', val)
-                    })
-
-                    // console.log('111111111111111', buildMetadata(viz))
-                    //console.log(viz)
-                }
-
-                else if (viz.datasource == null) {
-                    Object.keys(datasourceInfo).forEach(async element => {
-                        //console.log(datasourceInfo[element].isDefault)
-                        if (datasourceInfo[element].isDefault && datasourceInfo[element].type == 'elasticsearch') {
-                            buildMetadata(viz).then(val => {
-                                metaDataList.push(val);
-                                console.log('22222222222222', val)
-                            })
-                            // console.log('22222222222222222', buildMetadata(viz))
-                        }
-
-                    });
-                }
-                //await queryBuilding.buildQuery(viz, filename)
-            });
-            //await queryBuilding.buildQuery(viz[0], filename);
-            // }
-
-
-
-            //res.download('./' + filename + '.xlsx')
-            setTimeout(() => {
-                console.log('555555555555555555555555555', metaDataList)
-                res.send(metaDataList)
-            }, 1000)
+app.get('/export/excel', async function (req, res) {
+    var workbook = new Excel.Workbook();
+    workbook.creator = 'Me',
+        workbook.lastModifiedBy = 'Him',
+        workbook.created = new Date(2019, 10, 3),
+        workbook.modified = new Date(),
+        workbook.lastPrinted = new Date(2019, 10, 1),
+        workbook.views = [
+            {
+                x: 0, y: 0, width: 10000, height: 20000,
+                firstSheet: 0, activeTab: 1, visibility: 'visible'
+            }
+        ]
+    var result = metaDataList.map(metadata => {
+        return get_Esquery(metadata, 'excel', workbook);
+    });
+    Promise.all(result).then(val => {
+        let flag = true;
+        for (let i = 0; i < val.length; i++) {
+            if (val[i].status != 'success') {
+                flag = false;
+            }
         }
-        else if (error) {
-            console.log(error)
-            res.send(error)
+        if (flag == true) {
+            console.log("File successfully Downloaded in ", val[0].path);
+            res.download('./test.xlsx');
+        }
+        else {
+            console.log('File cannot be downloaded');
         }
     })
 
-    // res.write('works');
+
+    //res.download('./Reports/test.xlsx')
+
+
+})
 
 
 
-});
 
-
-
-app.listen(8082);
+app.listen(process.env.PORT || 8082);
